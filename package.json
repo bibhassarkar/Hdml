@@ -1,0 +1,1 @@
+{\n  "name": "my-chat-app",\n  "version": "1.0.0",\n  "description": "A real-time chat application using Express and Socket.io",\n  "dependencies": {\n    "express": "^4.17.1",\n    "socket.io": "^4.0.0"\n  }\n}
