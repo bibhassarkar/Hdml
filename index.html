@@ -1,0 +1,210 @@
+.```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google AI BG Remover (Offline)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+    <style>
+        body { 
+            background-color: #0b0f19; 
+            color: #e2e8f0; 
+            font-family: 'Inter', sans-serif;
+        }
+        .neon-text { 
+            text-shadow: 0 0 5px #0ff, 0 0 10px #0ff, 0 0 20px #0ff; 
+        }
+        .glow-btn { 
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.4); 
+            transition: all 0.3s ease-in-out; 
+        }
+        .glow-btn:hover:not(:disabled) { 
+            box-shadow: 0 0 25px rgba(0, 255, 255, 0.8); 
+            transform: translateY(-2px); 
+        }
+        .glow-btn:disabled { 
+            opacity: 0.5; 
+            box-shadow: none; 
+            cursor: not-allowed; 
+        }
+        /* Checkered pattern for transparent background visualization */
+        .checker-bg {
+            background-image: 
+                linear-gradient(45deg, #1a202c 25%, transparent 25%), 
+                linear-gradient(-45deg, #1a202c 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #1a202c 75%), 
+                linear-gradient(-45deg, transparent 75%, #1a202c 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 selection:bg-cyan-500 selection:text-white">
+
+    <div class="w-full max-w-2xl bg-gray-900 border border-gray-800 rounded-3xl p-6 sm:p-10 shadow-[0_0_40px_rgba(0,0,0,0.8)] relative overflow-hidden">
+        
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-70"></div>
+        <div class="absolute -top-10 -right-10 w-32 h-32 bg-cyan-600 rounded-full blur-[80px] opacity-20"></div>
+
+        <h1 class="text-2xl sm:text-3xl font-black text-center text-cyan-400 mb-8 tracking-widest uppercase neon-text">
+            Google AI BG Remover <span class="text-xs text-gray-400 tracking-normal block mt-1 neon-none drop-shadow-none">(Offline)</span>
+        </h1>
+
+        <div class="mb-6">
+            <label for="imageUpload" class="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-700 border-dashed rounded-2xl cursor-pointer bg-gray-800/50 hover:bg-gray-800 hover:border-cyan-500 transition-all duration-300 group">
+                <div class="flex flex-col items-center justify-center pt-5 pb-6 pointer-events-none">
+                    <svg class="w-12 h-12 mb-4 text-gray-500 group-hover:text-cyan-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                    </svg>
+                    <p class="mb-2 text-sm text-gray-400"><span class="font-bold text-cyan-400">Click to upload</span> or drag and drop</p>
+                    <p class="text-xs text-gray-500">PNG, JPG, WEBP</p>
+                </div>
+                <input id="imageUpload" type="file" accept="image/*" class="hidden" />
+            </label>
+        </div>
+
+        <img id="hiddenImage" class="hidden" alt="Source Image" />
+
+        <div class="text-center mb-6 h-6">
+            <p id="statusText" class="text-sm font-mono text-gray-400 animate-pulse">Initializing MediaPipe Model...</p>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-4 mb-6">
+            <button id="removeBtn" disabled class="flex-1 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold py-3 px-4 rounded-xl glow-btn flex items-center justify-center gap-2">
+                Remove Background 🪄
+            </button>
+            <button id="downloadBtn" disabled class="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-bold py-3 px-4 rounded-xl hidden flex items-center justify-center gap-2 hover:shadow-[0_0_15px_rgba(16,185,129,0.5)] transition-all">
+                Download HD 💾
+            </button>
+        </div>
+
+        <div id="canvasContainer" class="w-full rounded-2xl overflow-hidden border border-gray-700 checker-bg hidden relative shadow-inner">
+            <canvas id="resultCanvas" class="w-full h-auto block mx-auto"></canvas>
+        </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const imageUpload = document.getElementById('imageUpload');
+            const hiddenImage = document.getElementById('hiddenImage');
+            const removeBtn = document.getElementById('removeBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const statusText = document.getElementById('statusText');
+            const canvas = document.getElementById('resultCanvas');
+            const canvasContainer = document.getElementById('canvasContainer');
+            const ctx = canvas.getContext('2d');
+
+            let modelReady = false;
+
+            // 1. Initialize SelfieSegmentation
+            const selfieSegmentation = new SelfieSegmentation({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+                }
+            });
+
+            selfieSegmentation.setOptions({
+                modelSelection: 1, // 1 for General use, 0 for Landscape
+            });
+
+            // Handle results from MediaPipe
+            selfieSegmentation.onResults((results) => {
+                // Set canvas to actual image resolution for HD output
+                canvas.width = results.image.width;
+                canvas.height = results.image.height;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // The Magic: Draw original, then mask using destination-in
+                ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+                
+                ctx.globalCompositeOperation = 'destination-in';
+                ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
+                
+                // Reset composite operation
+                ctx.globalCompositeOperation = 'source-over';
+
+                // Update UI
+                canvasContainer.classList.remove('hidden');
+                statusText.textContent = "✨ Background removed successfully!";
+                statusText.className = "text-sm font-mono text-emerald-400";
+                
+                removeBtn.disabled = false;
+                downloadBtn.classList.remove('hidden');
+                downloadBtn.disabled = false;
+            });
+
+            // Pre-load the model silently
+            selfieSegmentation.initialize().then(() => {
+                modelReady = true;
+                statusText.textContent = "Model Ready. Please upload an image.";
+                statusText.classList.remove('animate-pulse');
+            }).catch(err => {
+                statusText.textContent = "Error loading model. Check console.";
+                statusText.className = "text-sm font-mono text-red-500";
+                console.error(err);
+            });
+
+            // 2. Handle File Upload
+            imageUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    hiddenImage.src = event.target.result;
+                    hiddenImage.onload = () => {
+                        statusText.textContent = "Image loaded. Ready to process.";
+                        statusText.className = "text-sm font-mono text-cyan-400";
+                        
+                        // Reset canvas and download button states
+                        canvasContainer.classList.add('hidden');
+                        downloadBtn.classList.add('hidden');
+                        downloadBtn.disabled = true;
+
+                        if (modelReady) {
+                            removeBtn.disabled = false;
+                        }
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // 3. Execution Flow Trigger
+            removeBtn.addEventListener('click', async () => {
+                if (!hiddenImage.src || !modelReady) return;
+
+                removeBtn.disabled = true;
+                statusText.textContent = "Processing image... Please wait.";
+                statusText.className = "text-sm font-mono text-yellow-400 animate-pulse";
+
+                try {
+                    // Send hidden image to the model
+                    await selfieSegmentation.send({ image: hiddenImage });
+                } catch (error) {
+                    console.error(error);
+                    statusText.textContent = "Error processing image.";
+                    statusText.className = "text-sm font-mono text-red-500";
+                    removeBtn.disabled = false;
+                }
+            });
+
+            // 4. Download HD Result
+            downloadBtn.addEventListener('click', () => {
+                const dataURL = canvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.download = `nobg_${Date.now()}.png`;
+                link.href = dataURL;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            });
+        });
+    </script>
+</body>
+</html>
+```
